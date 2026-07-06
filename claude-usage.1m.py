@@ -205,7 +205,11 @@ def get_usage(force=False):
     next_after = cache.get("next_fetch_after", 0)
 
     due = force or now >= next_after
-    if data and not due and window_rolled_over(data, now):
+    # Rollover should get us a prompt fetch after a window resets, but must never
+    # override an active post-failure backoff — otherwise a stale cached window
+    # (itself a symptom of failures) forces a retry every single 1-minute tick,
+    # hammering a rate-limited endpoint instead of backing off.
+    if data and not due and not cache.get("error_backoff") and window_rolled_over(data, now):
         due = True
 
     if not due:
@@ -222,6 +226,7 @@ def get_usage(force=False):
         # No backoff was previously persisted here, so a dead keychain read would
         # get retried every single minute forever. Back off like any other failure.
         cache["next_fetch_after"] = now + BACKOFF_ERROR
+        cache["error_backoff"] = True
         save_cache(cache)
         log_event(f"no token (force={force}): {err or 'empty token'}")
         if data:
@@ -235,6 +240,7 @@ def get_usage(force=False):
             # Jitter the backoff so the widget and the app don't re-collide on the
             # next window, and so repeated manual refreshes spread out.
             cache["next_fetch_after"] = now + BACKOFF_429 + random.randint(0, 120)
+            cache["error_backoff"] = True
             save_cache(cache)
             log_event(f"429 (force={force}); next fetch at {cache['next_fetch_after']:.0f}")
             if data:
@@ -247,6 +253,7 @@ def get_usage(force=False):
         # Non-429 failures previously left next_fetch_after untouched, so they'd get
         # retried every single minute with no backoff at all. Give them one too.
         cache["next_fetch_after"] = now + BACKOFF_ERROR
+        cache["error_backoff"] = True
         save_cache(cache)
         log_event(f"HTTP {e.code} (force={force}); next fetch at {cache['next_fetch_after']:.0f}")
         if e.code in (401, 403):
@@ -258,13 +265,15 @@ def get_usage(force=False):
         return None, {"short": "Claude: http", "detail": f"HTTP {e.code}"}
     except Exception as e:
         cache["next_fetch_after"] = now + BACKOFF_ERROR
+        cache["error_backoff"] = True
         save_cache(cache)
         log_event(f"error (force={force}): {e}; next fetch at {cache['next_fetch_after']:.0f}")
         if data:
             return data, {"fetched_at": fetched_at, "note": "offline — showing cached"}
         return None, {"short": "Claude: offline", "detail": str(e)}
 
-    save_cache({"data": fresh, "fetched_at": now, "next_fetch_after": now + FETCH_INTERVAL})
+    save_cache({"data": fresh, "fetched_at": now, "next_fetch_after": now + FETCH_INTERVAL,
+                "error_backoff": False})
     log_event(f"ok (force={force})")
     return fresh, {"fetched_at": now, "note": None}
 
