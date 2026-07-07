@@ -52,3 +52,7 @@ own account — no credentials are transmitted anywhere else.
 - `~/.cache/claude-usage.json` — current cached usage data.
 - `~/.cache/claude-usage.log` — append-only log of fetch attempts/outcomes, useful if the widget stops updating.
 - "Claude: no token" / "auth expired" — open Claude Code once to refresh the keychain token.
+
+## License
+
+[MIT](LICENSE)
