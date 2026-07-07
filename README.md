@@ -7,6 +7,8 @@ Reads the OAuth token Claude Code stores in the macOS keychain and calls the
 same `/api/oauth/usage` endpoint the Claude Code app uses. Read-only, your
 own account — no credentials are transmitted anywhere else.
 
+![Screenshot of the dropdown showing session and weekly usage, Claude status, and a Force update button](screenshot.png)
+
 ## Requirements
 
 - macOS
