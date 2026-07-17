@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # <xbar.title>Claude Usage</xbar.title>
-# <xbar.version>1.3</xbar.version>
+# <xbar.version>1.4</xbar.version>
 # <xbar.author>George Chen</xbar.author>
 # <xbar.desc>Claude session (5h) + weekly (7d) usage limits + status.claude.com health in the menu bar.</xbar.desc>
 # <xbar.dependencies>python3</xbar.dependencies>
@@ -31,7 +31,8 @@ LOG_PATH = os.path.expanduser("~/.cache/claude-usage.log")
 LOG_MAX_LINES = 2000    # trim the log once it grows past this many lines
 PLUGIN_PATH = os.path.abspath(__file__)  # for the non-destructive Force update button
 FETCH_INTERVAL = 600    # seconds between live fetches (countdown still ticks every minute)
-BACKOFF_429 = 900       # seconds to wait after a 429 before trying again
+BACKOFF_429 = 900       # fallback 429 backoff when the server sends no Retry-After
+BACKOFF_429_MAX = 3600  # cap on honoring a server Retry-After, in case it's absurd
 BACKOFF_ERROR = 120     # seconds to wait after a non-429 fetch failure (auth/network/no-token)
 
 # status.claude.com is a standard Atlassian Statuspage. summary.json is public,
@@ -118,6 +119,18 @@ def fmt_age(secs):
     if secs < 86400:
         return f"{secs // 3600}h ago"
     return f"{secs // 86400}d ago"
+
+def fmt_retry(next_after, now=None):
+    """Compact 'in ~Nm' until the persisted backoff lifts, so a force click that
+    lands in a rate-limit window can say when a retry will actually work."""
+    if not next_after:
+        return "shortly"
+    secs = int(next_after - (now if now is not None else time.time()))
+    if secs <= 0:
+        return "now"
+    if secs < 60:
+        return f"in ~{secs}s"
+    return f"in ~{secs // 60}m"
 
 # ---- token + request ---------------------------------------------------------
 def get_token():
@@ -237,19 +250,35 @@ def get_usage(force=False):
         fresh = fetch_usage(token)
     except urllib.error.HTTPError as e:
         if e.code == 429:
-            # Jitter the backoff so the widget and the app don't re-collide on the
-            # next window, and so repeated manual refreshes spread out.
-            cache["next_fetch_after"] = now + BACKOFF_429 + random.randint(0, 120)
+            # The endpoint's rate-limit window (~44 min observed) is much longer
+            # than a blind 15-min backoff, so blind retries land inside the still-
+            # active window and just 429 again — for hours during heavy use. Honor
+            # the server's Retry-After instead; small jitter so the widget and the
+            # app don't re-collide right at the window's end.
+            try:
+                retry_after = int(e.headers.get("Retry-After"))
+            except (TypeError, ValueError):
+                retry_after = None
+            if retry_after is not None and retry_after >= 0:
+                wait = min(retry_after, BACKOFF_429_MAX) + random.randint(5, 30)
+            else:
+                wait = BACKOFF_429 + random.randint(0, 120)
+            cache["next_fetch_after"] = now + wait
             cache["error_backoff"] = True
             save_cache(cache)
-            log_event(f"429 (force={force}); next fetch at {cache['next_fetch_after']:.0f}")
+            log_event(f"429 (force={force}, retry_after={retry_after}); "
+                      f"next fetch at {cache['next_fetch_after']:.0f}")
+            retry = fmt_retry(cache["next_fetch_after"], now)
             if data:
-                return data, {"fetched_at": fetched_at, "note": "rate-limited — showing cached"}
+                # Say WHEN a retry can work — a force click during the backoff
+                # otherwise looks like it did nothing.
+                return data, {"fetched_at": fetched_at,
+                              "note": f"rate-limited — retry {retry}"}
             # No cache yet: the backoff above is persisted, so the 1-minute refresh
             # won't hammer the endpoint. Show a calm waiting state, not an error.
             return None, {"short": "Claude usage…", "soft": True,
-                          "detail": "Endpoint rate-limited; no reading cached yet. "
-                                    "Auto-retries in ~15 min, or use Force update."}
+                          "detail": f"Endpoint rate-limited; no reading cached yet. "
+                                    f"Auto-retries {retry} (Force can't beat the limit)."}
         # Non-429 failures previously left next_fetch_after untouched, so they'd get
         # retried every single minute with no backoff at all. Give them one too.
         cache["next_fetch_after"] = now + BACKOFF_ERROR
@@ -257,9 +286,16 @@ def get_usage(force=False):
         save_cache(cache)
         log_event(f"HTTP {e.code} (force={force}); next fetch at {cache['next_fetch_after']:.0f}")
         if e.code in (401, 403):
+            # The plugin only reads the access token; it can't safely rotate it
+            # (Anthropic rotates refresh tokens, so refreshing here would knock
+            # Claude Code itself back to /login). Force update can't recover this
+            # — only reopening Claude Code refreshes the token. Say so plainly.
             if data:
-                return data, {"fetched_at": fetched_at, "note": "auth expired — open Claude Code"}
-            return None, {"short": "Claude: auth", "detail": f"{e.code} — token expired; open Claude Code"}
+                return data, {"fetched_at": fetched_at,
+                              "note": "auth expired — reopen Claude Code (Force can't refresh)"}
+            return None, {"short": "Claude: auth",
+                          "detail": f"{e.code} — token expired. Reopen Claude Code to refresh it; "
+                                    f"Force update can't (it can't rotate the token)."}
         if data:
             return data, {"fetched_at": fetched_at, "note": f"HTTP {e.code} — showing cached"}
         return None, {"short": "Claude: http", "detail": f"HTTP {e.code}"}
@@ -269,7 +305,8 @@ def get_usage(force=False):
         save_cache(cache)
         log_event(f"error (force={force}): {e}; next fetch at {cache['next_fetch_after']:.0f}")
         if data:
-            return data, {"fetched_at": fetched_at, "note": "offline — showing cached"}
+            return data, {"fetched_at": fetched_at,
+                          "note": f"offline — retry {fmt_retry(cache['next_fetch_after'], now)}"}
         return None, {"short": "Claude: offline", "detail": str(e)}
 
     save_cache({"data": fresh, "fetched_at": now, "next_fetch_after": now + FETCH_INTERVAL,
