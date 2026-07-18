@@ -18,29 +18,34 @@ own account — no credentials are transmitted anywhere else.
 
 ## Install
 
-1. Clone this repo into your SwiftBar plugin folder (or clone anywhere and symlink the script in):
+> **Important:** SwiftBar tries to execute *every* file in its plugin folder. Do
+> **not** point SwiftBar directly at this repo — it would try to run `README.md`,
+> `LICENSE`, and `screenshot.png` as plugins and report them as "Permission
+> denied" errors. Instead, keep the repo separate and symlink only the script
+> into a dedicated plugin folder.
+
+1. Clone the repo anywhere you like:
 
    ```bash
    git clone git@github.com:gchen19/swiftbar-claude-usage.git ~/swiftbar-claude-usage
-   ln -s ~/swiftbar-claude-usage/claude-usage.1m.py ~/.swiftbar-plugins/claude-usage.1m.py
    ```
 
-   Or clone straight into your existing plugin folder:
+2. Create a dedicated SwiftBar plugin folder that holds **only** the script, and symlink it in:
 
    ```bash
-   git clone git@github.com:gchen19/swiftbar-claude-usage.git ~/.swiftbar-plugins-tmp
-   cp ~/.swiftbar-plugins-tmp/claude-usage.1m.py ~/.swiftbar-plugins/
+   mkdir -p ~/.config/swiftbar
+   ln -s ~/swiftbar-claude-usage/claude-usage.1m.py ~/.config/swiftbar/
    ```
 
-2. Make sure the script is executable:
+3. Make sure the script is executable:
 
    ```bash
-   chmod +x ~/.swiftbar-plugins/claude-usage.1m.py
+   chmod +x ~/swiftbar-claude-usage/claude-usage.1m.py
    ```
 
-3. In SwiftBar: **Preferences → Plugin Folder** must point at the folder containing the script (e.g. `~/.swiftbar-plugins`). Then **Swift Bar → Refresh All Plugins** (or click the item's "Force update").
+4. In SwiftBar: **Preferences → Plugin Folder** must point at the dedicated folder (`~/.config/swiftbar`), **not** the repo. Then **SwiftBar → Refresh All Plugins** (or click the item's "Force update").
 
-4. The first keychain read may prompt for permission ("SwiftBar wants to access keychain item 'Claude Code-credentials'") — click **Always Allow**.
+5. The first keychain read may prompt for permission ("SwiftBar wants to access keychain item 'Claude Code-credentials'") — click **Always Allow**.
 
 ## Usage
 
@@ -54,6 +59,7 @@ own account — no credentials are transmitted anywhere else.
 - `~/.cache/claude-usage.json` — current cached usage data.
 - `~/.cache/claude-usage.log` — append-only log of fetch attempts/outcomes, useful if the widget stops updating.
 - "Claude: no token" / "auth expired" — open Claude Code once to refresh the keychain token.
+- "Permission denied" errors for `README.md`, `LICENSE`, or `screenshot.png` — SwiftBar is pointed at the repo instead of a dedicated plugin folder. Repoint **Preferences → Plugin Folder** at a folder containing only the script (see [Install](#install)).
 
 ## License
 
