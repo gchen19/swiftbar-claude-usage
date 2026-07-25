@@ -50,7 +50,7 @@ own account — no credentials are transmitted anywhere else.
 ## Usage
 
 - Menu bar shows session usage %, time to reset, and weekly usage %.
-- Click the item for a breakdown (session, weekly, weekly Opus/Sonnet, extra usage) and Claude status page health.
+- Click the item for a breakdown (session, weekly, per-model weekly caps like Opus/Sonnet/Fable, extra usage) and Claude status page health.
 - **Force update** does an immediate re-fetch (bypasses the normal ~10-minute cache interval).
 - The `.1m.` in the filename is SwiftBar's refresh interval (every 1 minute); actual network calls are throttled internally to every ~10 minutes to respect the endpoint's rate limit, with cached values shown in between.
 

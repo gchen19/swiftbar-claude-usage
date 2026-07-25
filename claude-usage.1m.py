@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # <xbar.title>Claude Usage</xbar.title>
-# <xbar.version>1.4</xbar.version>
+# <xbar.version>1.5</xbar.version>
 # <xbar.author>George Chen</xbar.author>
 # <xbar.desc>Claude session (5h) + weekly (7d) usage limits + status.claude.com health in the menu bar.</xbar.desc>
 # <xbar.dependencies>python3</xbar.dependencies>
@@ -430,6 +430,21 @@ def pct(block):
         return None
     return float(block["utilization"])
 
+def scoped_limits(data):
+    """Per-model weekly caps (Opus/Sonnet/Fable/...) come through the generic
+    'limits' list now — the old seven_day_opus/seven_day_sonnet fields go null
+    once a model has its own scoped cap. Reading 'limits' generically means a
+    new model (e.g. Fable) shows up without a code change."""
+    out = []
+    for l in data.get("limits") or []:
+        if l.get("kind") != "weekly_scoped":
+            continue
+        model = ((l.get("scope") or {}).get("model") or {}).get("display_name")
+        if not model:
+            continue
+        out.append({"model": model, "percent": l.get("percent"), "resets_at": l.get("resets_at")})
+    return out
+
 def main():
     force = "--force" in sys.argv[1:]
     data, meta = get_usage(force=force)
@@ -442,8 +457,15 @@ def main():
 
     five = pct(data.get("five_hour"))
     week = pct(data.get("seven_day"))
-    opus = pct(data.get("seven_day_opus"))
-    sonnet = pct(data.get("seven_day_sonnet"))
+    scoped = scoped_limits(data)
+    # Fall back to the legacy fixed fields if the account isn't on the generic
+    # 'limits' list yet (both are None once a model gets a scoped entry there).
+    if not scoped:
+        for key, model in (("seven_day_opus", "Opus"), ("seven_day_sonnet", "Sonnet")):
+            p = pct(data.get(key))
+            if p is not None:
+                scoped.append({"model": model, "percent": p,
+                               "resets_at": (data.get(key) or {}).get("resets_at")})
 
     five_s = f"{five:.0f}%" if five is not None else "—"
     week_s = f"{week:.0f}%" if week is not None else "—"
@@ -472,10 +494,12 @@ def main():
     line(f"Weekly (7d):  {week_s}", color=color_for(week))
     line(f"   resets {fmt_reset((data.get('seven_day') or {}).get('resets_at'))}",
          size=11, color=GRAY)
-    if opus is not None:
-        line(f"Weekly Opus:  {opus:.0f}%", color=color_for(opus))
-    if sonnet is not None:
-        line(f"Weekly Sonnet:  {sonnet:.0f}%", color=color_for(sonnet))
+    for s in scoped:
+        p = s.get("percent")
+        p_s = f"{p:.0f}%" if p is not None else "—"
+        line(f"Weekly {s['model']}:  {p_s}", color=color_for(p))
+        if s.get("resets_at"):
+            line(f"   resets {fmt_reset(s['resets_at'])}", size=11, color=GRAY)
 
     extra = data.get("extra_usage") or {}
     if extra.get("is_enabled"):
