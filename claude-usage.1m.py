@@ -436,13 +436,13 @@ def scoped_limits(data):
     once a model has its own scoped cap. Reading 'limits' generically means a
     new model (e.g. Fable) shows up without a code change."""
     out = []
-    for l in data.get("limits") or []:
-        if l.get("kind") != "weekly_scoped":
+    for lim in data.get("limits") or []:
+        if lim.get("kind") != "weekly_scoped":
             continue
-        model = ((l.get("scope") or {}).get("model") or {}).get("display_name")
+        model = ((lim.get("scope") or {}).get("model") or {}).get("display_name")
         if not model:
             continue
-        out.append({"model": model, "percent": l.get("percent"), "resets_at": l.get("resets_at")})
+        out.append({"model": model, "percent": lim.get("percent"), "resets_at": lim.get("resets_at")})
     return out
 
 def main():
