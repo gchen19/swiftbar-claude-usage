@@ -1,0 +1,16 @@
+version: 2
+
+# Only the github-actions ecosystem is configured: the plugin itself is a single
+# stdlib-only script with no manifest, so there is no pip ecosystem to watch.
+# Actions in ci.yml are pinned to full commit SHAs, which is what makes this
+# worth having — Dependabot moves the pins (and the `# vX.Y.Z` comments) forward,
+# which is otherwise a manual, easily forgotten chore.
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: ci
+    labels:
+      - dependencies
