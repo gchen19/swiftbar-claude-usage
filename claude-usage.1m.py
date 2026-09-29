@@ -33,6 +33,8 @@ PLUGIN_PATH = os.path.abspath(__file__)  # for the non-destructive Force update 
 FETCH_INTERVAL = 600    # seconds between live fetches (countdown still ticks every minute)
 BACKOFF_429 = 900       # fallback 429 backoff when the server sends no Retry-After
 BACKOFF_429_MAX = 3600  # cap on honoring a server Retry-After, in case it's absurd
+LOGGED_OUT = "logged out"
+LOGIN_HINT = "Run `claude` in a terminal, then /login"
 BACKOFF_ERROR = 120     # seconds to wait after a non-429 fetch failure (auth/network/no-token)
 
 # status.claude.com is a standard Atlassian Statuspage. summary.json is public,
@@ -138,12 +140,15 @@ def get_token():
         ["security", "find-generic-password", "-s", KEYCHAIN_SERVICE, "-w"],
         capture_output=True, text=True, timeout=10,
     )
+    if raw.returncode == 44:  # errSecItemNotFound: Claude Code never logged in / logged out
+        return None, LOGGED_OUT
     if raw.returncode != 0:
         return None, "keychain read failed"
     try:
         data = json.loads(raw.stdout)
         oauth = data.get("claudeAiOauth", data)
-        return oauth.get("accessToken"), None
+        # /logout leaves the keychain item in place but drops the access token.
+        return oauth.get("accessToken"), None if oauth.get("accessToken") else LOGGED_OUT
     except Exception as e:
         return None, f"token parse: {e}"
 
@@ -242,6 +247,12 @@ def get_usage(force=False):
         cache["error_backoff"] = True
         save_cache(cache)
         log_event(f"no token (force={force}): {err or 'empty token'}")
+        if err == LOGGED_OUT:
+            if data:
+                return data, {"fetched_at": fetched_at, "logged_out": True,
+                              "note": f"Claude Code is logged out — numbers are stale. {LOGIN_HINT}."}
+            return None, {"short": "Claude: logged out", "hint": LOGIN_HINT,
+                          "detail": "Claude Code is logged out, so there's no token to read usage with."}
         if data:
             return data, {"fetched_at": fetched_at, "note": "token unavailable — cached"}
         return None, {"short": "Claude: no token", "detail": err or "no access token in keychain"}
@@ -412,7 +423,7 @@ def render_status(status):
     line("Open status.claude.com", href="https://status.claude.com", size=11)
 
 # ---- render ------------------------------------------------------------------
-def render_error(short, detail, soft=False, badge=""):
+def render_error(short, detail, soft=False, badge="", hint="Open Claude Code to refresh the token"):
     prefix = f"{badge} " if badge else ""
     if soft:
         # Transient / waiting state (e.g. cold-start 429): stay neutral, no warning.
@@ -422,7 +433,7 @@ def render_error(short, detail, soft=False, badge=""):
     print(SEP)
     line(detail, color=GRAY)
     if not soft:
-        line("Open Claude Code to refresh the token", color=GRAY)
+        line(hint, color=GRAY)
     line(f"Force update | bash={PLUGIN_PATH} param1=--force terminal=false refresh=true")
 
 def pct(block):
@@ -451,7 +462,8 @@ def main():
     status = get_status(force=force)
     badge = STATUS_BADGE.get((status or {}).get("indicator", "none"), "")
     if data is None:
-        render_error(meta["short"], meta["detail"], soft=meta.get("soft", False), badge=badge)
+        render_error(meta["short"], meta["detail"], soft=meta.get("soft", False), badge=badge,
+                     **({"hint": meta["hint"]} if meta.get("hint") else {}))
         render_status(status)
         return
 
@@ -475,9 +487,14 @@ def main():
     cd = fmt_countdown((data.get("five_hour") or {}).get("resets_at"))
     reset_s = f" ↻{cd}" if cd else ""
     prefix = f"{badge} " if badge else ""
+    if meta.get("logged_out"):
+        # Cached numbers would otherwise look live; flag them right in the menu bar.
+        prefix += "⚠️ logged out · "
     menu = f"{prefix}⏱ {five_s}{reset_s} · :chart.bar: {week_s}"
     binding = max([x for x in (five, week) if x is not None], default=0)
-    if badge:
+    if meta.get("logged_out"):
+        line(menu, size=13, color="#b25000,#ff9f0a")
+    elif badge:
         # An active outage/maintenance takes visual precedence over usage color.
         line(menu, size=13, color=status_color(status.get("indicator")))
     elif binding >= 75:
